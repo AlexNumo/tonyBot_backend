@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import sys
+import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiohttp import web
 
 import config
 import database
@@ -16,7 +18,25 @@ logging.basicConfig(
     stream=sys.stdout
 )
 
+async def handle_health(request):
+    return web.Response(text="Bot is alive and polling!")
+
+async def start_health_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health)
+    app.router.add_get("/health", handle_health)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logging.info(f"Веб-сервер перевірки працездатності запущено на порту {port}")
+
 async def main():
+    # Запуск веб-сервера перевірки працездатності для Render
+    asyncio.create_task(start_health_server())
+
     # Ініціалізація клієнта бази даних Supabase
     logging.info("Клієнт Supabase успішно ініціалізований.")
     

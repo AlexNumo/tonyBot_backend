@@ -21,3 +21,11 @@ if not SUPABASE_URL:
 
 if not SUPABASE_KEY:
     raise ValueError("Помилка: SUPABASE_KEY не знайдено у файлі .env.")
+
+# Додаткові налаштування для об'єднання ботів
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+EXPRESS_API_URL = os.getenv("EXPRESS_API_URL", "http://localhost:3000")
+LESSONS_FILE_PATH = os.getenv("LESSONS_FILE_PATH", "../tony_tg_bot-main/src/data/lessons.json")
+
+if not GEMINI_API_KEY:
+    print("Попередження: GEMINI_API_KEY не знайдено у файлі .env. ШІ-помічник працюватиме в режимі заглушки.")

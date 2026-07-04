@@ -44,3 +44,13 @@ def _get_packages_sync():
 async def get_packages():
     """Асинхронна обгортка для отримання тарифів."""
     return await asyncio.to_thread(_get_packages_sync)
+
+
+def _save_user_phone_sync(user_id: int, phone: str):
+    """Синхронне оновлення номера телефону користувача в Supabase."""
+    supabase.table("users").update({"phone": phone}).eq("user_id", user_id).execute()
+
+async def save_user_phone(user_id: int, phone: str):
+    """Асинхронна обгортка для оновлення номера телефону."""
+    await asyncio.to_thread(_save_user_phone_sync, user_id, phone)
+
