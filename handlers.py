@@ -94,8 +94,10 @@ async def sync_message_to_express(telegram_id: int, sender: str, text: str):
     if not config.EXPRESS_API_URL:
         return
     try:
+        # Очищаємо URL від зайвих символів '/' в кінці, щоб уникнути помилок 404
+        express_url = config.EXPRESS_API_URL.rstrip('/')
         async with httpx.AsyncClient(timeout=5.0) as client:
-            url = f"{config.EXPRESS_API_URL}/api/messages/save"
+            url = f"{express_url}/api/messages/save"
             payload = {
                 "telegramId": str(telegram_id),
                 "sender": sender,
@@ -157,7 +159,8 @@ async def get_lessons():
     # 1. Спроба завантажити з Express API (підходить для продакшену на Render)
     if config.EXPRESS_API_URL:
         try:
-            url = f"{config.EXPRESS_API_URL}/api/lessons"
+            express_url = config.EXPRESS_API_URL.rstrip('/')
+            url = f"{express_url}/api/lessons"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(url)
                 if response.status_code == 200:
