@@ -3,7 +3,9 @@ from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import os
+import asyncio
 import json
 import re
 import httpx
@@ -12,6 +14,9 @@ import config
 import database
 
 router = Router()
+
+# Словник для лімітування кількості щоденних запитів до ШІ (user_id -> (date, count))
+user_ai_daily_tracker = {}
 
 # Визначення станів для діагностичного тесту
 class TestStates(StatesGroup):
@@ -119,39 +124,119 @@ async def notify_admin_about_message(user_id: int, username: str, text: str, bot
         print(f"Помилка надсилання сповіщення адміну {ADMIN_TELEGRAM_ID}: {e}")
 
 
-async def generate_gemini_response(user_prompt: str, username: str, api_key: str) -> str:
-    """Генерує відповідь від імені Антоніни через Gemini API."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
+async def send_admin_bot_notification(text: str):
+    """Надсилає сповіщення Антоніні та розробнику через спеціального адмін-бота."""
+    if not config.ADMIN_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{config.ADMIN_BOT_TOKEN}/sendMessage"
+    admin_ids = [7780694746, 216147493]
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for admin_id in admin_ids:
+            payload = {
+                "chat_id": admin_id,
+                "text": text,
+                "parse_mode": "HTML"
+            }
+            try:
+                await client.post(url, json=payload)
+            except Exception as e:
+                print(f"Помилка відправки через адмін-бота на {admin_id}: {e}")
+
+
+async def generate_ai_response(user_prompt: str, username: str, history: list = None) -> str:
+    """Генерує емпатичну відповідь від імені Антоніни через Groq або Gemini API."""
+    gemini_key = config.GEMINI_API_KEY
+    groq_key = config.GROQ_API_KEY
     
     system_instruction = (
-        f"Ти — Антоніна, авторка та коуч психотерапевтичного практикуму з усвідомленості, медитації та емоційного балансу. \n"
-        f"Твоє завдання — з теплотою, емпатією, любов'ю та професіоналізмом відповідати на повідомлення клієнтів. \n"
-        f"Звертайся за нікнеймом ({username}) у дружній та довірливій формі. Давай короткі, надихаючі та змістовні відповіді виключно українською мовою. \n"
-        f"Підтримуй користувача, якщо він переживає стрес, тривогу чи втому, ділися порадами з фокусування на диханні."
-    )
-    
-    payload = {
-        "contents": [{
-            "parts": [{"text": user_prompt}]
-        }],
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
+        "Ти — Антоніна, психологиня, енерготерапевтка та авторка терапевтичного практикуму «Точка переходу». "
+        "Твоє завдання — спілкуватися з учасницями практикуму з глибокою емпатією, любов'ю, підтримкою та професіоналізмом. "
+        "Звертайся до користувачки за її ім'ям або нікнеймом ({username}) у дружній, довірливій формі. Відповідай виключно українською мовою. "
+        "Будь гранично лаконічною: давай відповіді довжиною не більше 3-4 речень (максимум 70 слів), щоб економити токени та тримати діалог фокусованим.\n\n"
+        "ІНФОРМАЦІЯ ПРО ПРАКТИКУМ «ТОЧКА ПЕРЕХОДУ»:\n"
+        "- Формат: 7+1 день глибинної роботи у власному темпі. Кожен день містить відео (15-20 хв), трансформаційну аудіо-практику та робочий зошит PDF.\n"
+        "- День 1: «Я не втратила мотивацію. Я переросла» (розпізнавання саботажу та нових етапів).\n"
+        "- День 2: «Що насправді забирає мою енергію» (виявлення фонових витоків ресурсу).\n"
+        "- День 3: «Що я тримаю — і боюсь відпустити» (страх змін та ціна надмірного контролю).\n"
+        "- День 4: «Зустріч із собою справжньою» (звільнення від чужих ролей).\n"
+        "- День 5: «Кордони та свобода бути собою».\n"
+        "- День 6: «Мої справжні бажання».\n"
+        "- День 7: «Створення нового договірного поля».\n"
+        "- День 8: «Точка інтеграції та перші кроки».\n\n"
+        "ДЕТАЛІ ТАРИФІВ ТА ПАКЕТІВ УЧАСТІ:\n"
+        "1. Пакет «Самостійно» (Базовий): Ціна 1900 грн (або 20€). Включає: 8 відео-уроків, 8 аудіо-практик, Робочий зошит PDF, доступ до матеріалів назавжди.\n"
+        "2. Пакет «Зі спікером» (Супровід): Ціна 4900 грн (або 125€). Включає: все з Базового + участь у закритій групі з іншими учасницями, голосові відповіді від Антоніни на ваші запитання, 1 жива Zoom-сесія з розбором запитів.\n"
+        "3. Пакет «Індивідуально» (VIP Супровід): Ціна 12000 грн (або 400€). Включає: все з Базового + 4 особисті терапевтичні сесії Zoom з Антоніною, особистий чат підтримки 24/7 зі спікером, розробка індивідуальної карти практик.\n\n"
+        "ПРАВИЛА ПОВЕДІНКИ:\n"
+        "1. Якщо учасниця почувається погано, втомленою чи тривожною: підтримай її, порадь повернути увагу в тіло, зробити повільний видих.\n"
+        "2. Якщо просить платні матеріали (День 2-8), ввічливо поясни, що вони відкриваються після оплати тарифу в кабінеті WebApp.\n"
+        "3. Якщо просить зв'язати її з Антоніною, скаржиться на помилки оплати чи висловлює глибоку кризу — обов'язково закінчи свою відповідь виключно тегом [CALL_HUMAN] на новому рядку."
+    ).replace("{username}", username)
+
+    # 1. Спроба використати Groq API (безкоштовно, без карти)
+    if groq_key:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {groq_key}",
+            "Content-Type": "application/json"
         }
-    }
-    
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=payload)
-            if response.status_code == 200:
-                res_data = response.json()
-                text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                return text.strip()
-            else:
-                print(f"Gemini API status {response.status_code}: {response.text}")
-    except Exception as e:
-        print(f"Помилка виклику Gemini API: {e}")
         
-    return "Дякую за повідомлення! Зберігайте спокій, дихайте глибоко. Я поруч. 🙏"
+        # Будуємо масив повідомлень для контексту
+        messages = [{"role": "system", "content": system_instruction}]
+        if history:
+            for msg in history:
+                role = "user" if msg.get("sender") == "user" else "assistant"
+                clean_text = msg.get("text", "").replace("[CALL_HUMAN]", "").strip()
+                messages.append({"role": role, "content": clean_text})
+        messages.append({"role": "user", "content": user_prompt})
+
+        payload = {
+            "model": "llama-3.1-8b-instant",
+            "messages": messages,
+            "temperature": 0.7,
+            "max_tokens": 250  # Обмеження вихідних токенів для економії ліміту
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.post(url, headers=headers, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["choices"][0]["message"]["content"].strip()
+                else:
+                    print(f"Groq API error {res.status_code}: {res.text}")
+        except Exception as e:
+            print(f"Помилка запиту до Groq API: {e}")
+
+    # 2. Спроба використати Gemini API (якщо налаштована)
+    if gemini_key:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+        
+        # Будуємо масив повідомлень для контексту Gemini
+        contents = []
+        if history:
+            for msg in history:
+                role = "user" if msg.get("sender") == "user" else "model"
+                clean_text = msg.get("text", "").replace("[CALL_HUMAN]", "").strip()
+                contents.append({"role": role, "parts": [{"text": clean_text}]})
+        contents.append({"role": "user", "parts": [{"text": user_prompt}]})
+
+        payload = {
+            "contents": contents,
+            "systemInstruction": {"parts": [{"text": system_instruction}]}
+        }
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.post(url, json=payload)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                else:
+                    print(f"Gemini API status {res.status_code}: {res.text}")
+        except Exception as e:
+            print(f"Помилка виклику Gemini API: {e}")
+        
+    return "Дякую за повідомлення! Я обов'язково відповім вам особисто найближчим часом. Зберігайте спокій, зробіть глибокий вдих. Я поруч. 🙏 [CALL_HUMAN]"
 
 
 async def get_lessons():
@@ -247,6 +332,77 @@ async def get_lessons():
     ]
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def find_day_files(day_num: int):
+    """Шукає медіафайли для певного дня в папці Material."""
+    day_folder = os.path.join(BASE_DIR, "Material", f"day {day_num}")
+    if not os.path.exists(day_folder):
+        return None
+        
+    try:
+        files = os.listdir(day_folder)
+    except Exception as e:
+        print(f"Помилка сканування папки {day_folder}: {e}")
+        return None
+        
+    photo_file = None
+    video_file = None
+    audio_file = None
+    pdf_file = None
+    
+    for f in files:
+        f_lower = f.lower()
+        full_path = os.path.join(day_folder, f)
+        if os.path.isdir(full_path):
+            continue
+            
+        if f_lower.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            photo_file = full_path
+        elif f_lower.endswith((".mp4", ".mov", ".avi", ".mkv", ".3gp")):
+            video_file = full_path
+        elif f_lower.endswith((".mp3", ".m4a", ".wav", ".ogg")):
+            audio_file = full_path
+        elif f_lower.endswith(".pdf"):
+            pdf_file = full_path
+            
+    return {
+        "photo": photo_file,
+        "video": video_file,
+        "audio": audio_file,
+        "document": pdf_file
+    }
+
+
+async def register_file_id_automatically(day_num: int, media_type: str, file_id: str, filename: str = None):
+    """Автоматично реєструє file_id у файлі lessons.json через Express API."""
+    try:
+        lessons = await get_lessons()
+        lesson = next((l for l in lessons if l.get("day") == day_num), None)
+        if not lesson:
+            return False
+            
+        if media_type == "photo":
+            lesson["photoFileId"] = file_id
+        elif media_type == "video":
+            lesson["videoFileId"] = file_id
+        elif media_type == "audio":
+            lesson["audioFileId"] = file_id
+        elif media_type == "document":
+            lesson["pdfFileId"] = file_id
+            if filename:
+                lesson["pdfFiles"] = [filename]
+            
+        if config.EXPRESS_API_URL:
+            express_url = config.EXPRESS_API_URL.rstrip('/')
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.put(f"{express_url}/api/lessons", json={"lessons": lessons})
+                return res.status_code == 200
+    except Exception as e:
+        print(f"Помилка автореєстрації file_id: {e}")
+    return False
+
+
 # --- ОБРОБНИКИ КОМАНД ТА CALLBACK-ЗАПИТІВ ---
 
 @router.message(Command("start"))
@@ -255,29 +411,94 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     username = message.from_user.username
+    first_name = message.from_user.first_name
+    last_name = message.from_user.last_name
     
+    # Парсинг реферального UTM параметру з команди (наприклад, /start ref_insta)
+    utm_source = None
+    utm_medium = None
+    parts = message.text.split() if message.text else []
+    if len(parts) > 1:
+        utm_source = parts[1]
+        utm_medium = "telegram_bot"
+
+    # Отримання посилання на аватарку
+    avatar_url = None
+    try:
+        photos = await message.bot.get_user_profile_photos(user_id=user_id, limit=1)
+        if photos.total_count > 0:
+            file_id = photos.photos[0][-1].file_id  # найбільша фотографія
+            file = await message.bot.get_file(file_id)
+            if file.file_path and config.BOT_TOKEN:
+                avatar_url = f"https://api.telegram.org/file/bot{config.BOT_TOKEN}/{file.file_path}"
+    except Exception as e:
+        print(f"Помилка отримання аватарки: {e}")
+
     # Синхронізація вхідного повідомлення
     await sync_message_to_express(user_id, "user", "/start")
     
     # Сповіщення адміна
     user_label = f"@{username}" if username else message.from_user.full_name
-    await notify_admin_about_message(user_id, user_label, "/start", message.bot)
+    await notify_admin_about_message(user_id, user_label, f"/start (utm: {utm_source})", message.bot)
     
-    # Збереження користувача в базі даних Supabase
+    # Збереження користувача в базі даних із додатковими даними
     try:
-        await database.add_user(user_id, username)
+        await database.add_user(
+            user_id=user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            avatar_url=avatar_url,
+            utm_source=utm_source,
+            utm_medium=utm_medium
+        )
+        # Логування дії користувача
+        await database.log_user_action(
+            user_id=user_id,
+            action_type="command",
+            target_element="/start",
+            metadata={"utm_source": utm_source, "utm_medium": utm_medium}
+        )
     except Exception as e:
         print(f"Помилка збереження користувача в БД: {e}")
         
-    welcome_text = (
-        f"Вітаю, {message.from_user.full_name}! ✨\n\n"
-        "Рада бачити тебе тут. Я — провідник в онлайн-практикум **«Точка переходу»** Антоніни Пашко.\n\n"
-        "Цей 7+1 денний практикум створений для жінок, у яких зовні все ніби добре, "
-        "але всередині все частіше з'являється чесне відчуття: **так більше не хочу**.\n\n"
-        "Обери цікавий розділ меню нижче, або почни з швидкого діагностичного тесту, "
-        "щоб виявити, чи не блокує нейросаботаж твої справжні бажання."
-    )
-    
+    # Зчитуємо текст привітання з файлу або беремо стандартний
+    welcome_text_path = os.path.join(BASE_DIR, "Material", "Вітальне повідомлення.txt")
+    welcome_text = ""
+    if os.path.exists(welcome_text_path):
+        try:
+            with open(welcome_text_path, "r", encoding="utf-8") as f:
+                welcome_text = f.read()
+        except Exception as e:
+            print(f"Помилка зчитування файлу привітання: {e}")
+            
+    if not welcome_text:
+        welcome_text = (
+            f"Вітаю, {message.from_user.full_name}! ✨\n\n"
+            "Рада бачити тебе тут. Я — провідник в онлайн-практикум **«Точка переходу»** Антоніни Пашко.\n\n"
+            "Цей 7+1 денний практикум створений для жінок, у яких зовні все ніби добре, "
+            "але всередині все частіше з'являється чесне відчуття: **так більше не хочу**.\n\n"
+            "Обери цікавий розділ меню нижче, або почни з швидкого діагностичного тесту, "
+            "об виявити, чи не блокує нейросаботаж твої справжні бажання."
+        )
+
+    # Перевіряємо наявність welcomePhotoFileId у першому уроці для надсилання вітального фото
+    welcome_photo_id = None
+    try:
+        lessons = await get_lessons()
+        if lessons and "welcomePhotoFileId" in lessons[0]:
+            welcome_photo_id = lessons[0]["welcomePhotoFileId"]
+    except Exception as e:
+        print(f"Помилка отримання welcomePhotoFileId: {e}")
+        
+    # Якщо є зареєстроване фото — спочатку відправляємо його
+    if welcome_photo_id:
+        try:
+            await message.answer_photo(photo=welcome_photo_id, protect_content=True)
+            await sync_message_to_express(user_id, "bot", "[Надіслано вітальне фото]")
+        except Exception as e:
+            print(f"Помилка надсилання вітального фото: {e}")
+            
     await message.answer(welcome_text, reply_markup=get_main_menu_keyboard(), protect_content=True)
     # Синхронізація відповіді
     await sync_message_to_express(user_id, "bot", welcome_text)
@@ -288,6 +509,7 @@ async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
     """Повернення до головного меню."""
     await state.clear()
     user_id = callback.from_user.id
+    await database.log_user_action(user_id, "click_button", "main_menu")
     await sync_message_to_express(user_id, "user", "[Клік: Головне меню]")
     
     welcome_text = (
@@ -303,6 +525,7 @@ async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
 async def process_about_course(callback: types.CallbackQuery):
     """Розділ 'Про практикум'."""
     user_id = callback.from_user.id
+    await database.log_user_action(user_id, "click_button", "about_course")
     await sync_message_to_express(user_id, "user", "[Клік: Про практикум]")
     
     text = (
@@ -336,6 +559,7 @@ async def process_about_course(callback: types.CallbackQuery):
 async def process_about_author(callback: types.CallbackQuery):
     """Розділ 'Про автора'."""
     user_id = callback.from_user.id
+    await database.log_user_action(user_id, "click_button", "about_author")
     await sync_message_to_express(user_id, "user", "[Клік: Про автора]")
     
     text = (
@@ -360,6 +584,7 @@ async def process_about_author(callback: types.CallbackQuery):
 async def process_contacts(callback: types.CallbackQuery):
     """Розділ контакту."""
     user_id = callback.from_user.id
+    await database.log_user_action(user_id, "click_button", "contacts")
     await sync_message_to_express(user_id, "user", "[Клік: Задати питання]")
     
     text = (
@@ -379,6 +604,7 @@ async def process_contacts(callback: types.CallbackQuery):
 async def process_program_menu(callback: types.CallbackQuery):
     """Меню вибору дня програми."""
     user_id = callback.from_user.id
+    await database.log_user_action(user_id, "click_button", "program_menu")
     await sync_message_to_express(user_id, "user", "[Клік: Програма за днями]")
     
     text = (
@@ -754,28 +980,152 @@ async def cmd_day(message: types.Message):
         block_text = f"🔒 *Матеріали [День {day_num}] заблоковано.*\n\nДля отримання доступу, будь ласка, придбайте один із пакетів участі в кабінеті нашого WebApp або зверніться безпосередньо до Антоніни Пашко."
         await message.answer(block_text, parse_mode="Markdown")
         await sync_message_to_express(user_id, "bot", block_text)
+        await database.log_course_progress(user_id=user_id, day_num=day_num, delivery_type="command", status="failed", error_message="🔒 Неоплачений доступ (free)")
     else:
         lessons = await get_lessons()
         lesson = next((l for l in lessons if l.get("day") == day_num), None)
-        if lesson:
-            pdf_files = lesson.get("pdfFiles", [])
-            pdf_str = "\n".join([f"• {f}" for f in pdf_files]) if pdf_files else "—"
-            
-            lesson_text = (
-                f"🌸 *ПРАКТИКУМ «ТОЧКА ПЕРЕХОДУ» — ДЕНЬ {lesson.get('day')}* 🌸\n\n"
-                f"✨ *Тема:* {lesson.get('title')}\n"
-                f"📝 *Опис:* {lesson.get('description')}\n\n"
-                f"🎥 *Відео-урок:* {lesson.get('videoDuration', '15-20 хв')}\n"
-                f"🧘‍♀️ *Практика:* {lesson.get('practiceTitle', 'Аудіо-медитація')}\n\n"
-                f"*Детальний зміст заняття:*\n{lesson.get('fullDescription', '')}\n\n"
-                f"📂 *Завдання в робочому зошиті:*\n{pdf_str}"
-            )
-            await message.answer(lesson_text, parse_mode="Markdown")
-            await sync_message_to_express(user_id, "bot", lesson_text)
-        else:
+        
+        # Перевірка наявності локальних файлів
+        day_files = find_day_files(day_num)
+        has_local_files = day_files and any(day_files.values())
+        
+        if not lesson and not has_local_files:
             err_text = f"❌ Матеріали для дня {day_num} наразі недоступні."
             await message.answer(err_text)
             await sync_message_to_express(user_id, "bot", err_text)
+            return
+
+        # 1. Надсилаємо вступне текстове повідомлення
+        lesson_text = ""
+        if lesson:
+            pdf_files_list = lesson.get("pdfFiles", [])
+            pdf_str = "\n".join([f"• {f}" for f in pdf_files_list]) if pdf_files_list else "—"
+            lesson_text = (
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🌸 *ДЕНЬ {lesson.get('day')} • ПРАКТИКУМ «ТОЧКА ПЕРЕХОДУ»* 🌸\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"✨ *Тема дня:*\n«{lesson.get('title')}»\n\n"
+                f"📝 *Про що цей день:*\n{lesson.get('description')}\n\n"
+                f"┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
+                f"ℹ️ *МАТЕРІАЛИ ЗАНЯТТЯ:*\n"
+                f"🎥 *Відео-урок:* {lesson.get('videoDuration', '15-20 хв')}\n"
+                f"🧘‍♀️ *Практика:* {lesson.get('practiceTitle', 'Аудіо-медитація')}\n\n"
+                f"📖 *Детальний зміст:*\n{lesson.get('fullDescription', '')}\n\n"
+                f"📂 *Завдання в робочому зошиті:*\n{pdf_str}\n\n"
+                f"┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n"
+                f"🙏 Проходьте практику у зручному темпі!\n"
+                f"Наступний урок буде надіслано автоматично."
+            )
+        else:
+            lesson_text = f"🌸 *ДЕНЬ {day_num} • ПРАКТИКУМ «ТОЧКА ПЕРЕХОДУ»* 🌸\n\nЗавантаження матеріалів..."
+
+        await message.answer(lesson_text, parse_mode="Markdown")
+        await sync_message_to_express(user_id, "bot", lesson_text)
+        
+        # 2. Надсилаємо медіа-файли
+        # Якщо в lessons.json збережені file_id — надсилаємо їх напряму (працює як в хмарі, так і локально)
+        if lesson:
+            # Спочатку Фото
+            if lesson.get("photoFileId"):
+                try:
+                    await asyncio.sleep(15)
+                    await message.answer_photo(photo=lesson.get("photoFileId"), caption="🖼 Зображення дня", protect_content=True)
+                    await sync_message_to_express(user_id, "bot", "[Надіслано фото за file_id]")
+                except Exception as e:
+                    print(f"Помилка надсилання фото за file_id: {e}")
+                    
+            # Тепер Відео
+            if lesson.get("videoFileId"):
+                try:
+                    await asyncio.sleep(15)
+                    await message.answer_video(video=lesson.get("videoFileId"), caption="🎥 Відео-урок", protect_content=True)
+                    await sync_message_to_express(user_id, "bot", "[Надіслано відео за file_id]")
+                except Exception as e:
+                    print(f"Помилка надсилання відео за file_id: {e}")
+                    
+            # Тепер Аудіо
+            if lesson.get("audioFileId"):
+                try:
+                    await asyncio.sleep(15)
+                    await message.answer_audio(audio=lesson.get("audioFileId"), caption="🧘‍♀️ Аудіо-практика", protect_content=True)
+                    await sync_message_to_express(user_id, "bot", "[Надіслано аудіо за file_id]")
+                except Exception as e:
+                    print(f"Помилка надсилання адіо за file_id: {e}")
+                    
+            # Тепер Робочий зошит PDF
+            if lesson.get("pdfFileId"):
+                try:
+                    await asyncio.sleep(15)
+                    await message.answer_document(document=lesson.get("pdfFileId"), caption="📝 Практика (робочий зошит)", protect_content=True)
+                    await sync_message_to_express(user_id, "bot", "[Надіслано робочий зошит за file_id]")
+                except Exception as e:
+                    print(f"Помилка надсилання документа за file_id: {e}")
+
+        # Якщо є локальні файли в папці, але для них ще немає file_id (перший запуск) —
+        # завантажуємо їх з диска та автоматично зберігаємо їхні file_id на майбутнє
+        if has_local_files:
+            # Якщо фото є на диску, але немає в базі
+            if day_files["photo"] and (not lesson or not lesson.get("photoFileId")):
+                try:
+                    loading_msg = await message.answer("🖼 Завантаження зображення...")
+                    input_file = FSInputFile(day_files["photo"])
+                    sent_msg = await message.answer_photo(photo=input_file, caption="🖼 Зображення дня", protect_content=True)
+                    await loading_msg.delete()
+                    await sync_message_to_express(user_id, "bot", f"[Завантажено локальне фото: {os.path.basename(day_files['photo'])}]")
+                    await register_file_id_automatically(day_num, "photo", sent_msg.photo[-1].file_id)
+                except Exception as e:
+                    print(f"Помилка завантаження локального фото: {e}")
+
+            # Якщо відео є на диску, але немає в базі
+            if day_files["video"] and (not lesson or not lesson.get("videoFileId")):
+                f_size = os.path.getsize(day_files["video"])
+                if f_size < 50 * 1024 * 1024:
+                    try:
+                        loading_msg = await message.answer("🎥 Завантаження відео-уроку...")
+                        input_file = FSInputFile(day_files["video"])
+                        sent_msg = await message.answer_video(video=input_file, caption="🎥 Відео-урок", protect_content=True)
+                        await loading_msg.delete()
+                        await sync_message_to_express(user_id, "bot", f"[Завантажено локальне відео: {os.path.basename(day_files['video'])}]")
+                        await register_file_id_automatically(day_num, "video", sent_msg.video.file_id)
+                    except Exception as e:
+                        print(f"Помилка завантаження локального відео: {e}")
+
+            # Якщо аудіо є на диску, але немає в базі
+            if day_files["audio"] and (not lesson or not lesson.get("audioFileId")):
+                f_size = os.path.getsize(day_files["audio"])
+                if f_size < 50 * 1024 * 1024:
+                    try:
+                        loading_msg = await message.answer("🧘‍♀️ Завантаження аудіо-практики...")
+                        input_file = FSInputFile(day_files["audio"])
+                        sent_msg = await message.answer_audio(audio=input_file, caption="🧘‍♀️ Аудіо-практика", protect_content=True)
+                        await loading_msg.delete()
+                        await sync_message_to_express(user_id, "bot", f"[Завантажено локальне аудіо: {os.path.basename(day_files['audio'])}]")
+                        await register_file_id_automatically(day_num, "audio", sent_msg.audio.file_id)
+                    except Exception as e:
+                        print(f"Помилка завантаження локального аудіо: {e}")
+
+            # Якщо документ є на диску, але немає в базі
+            if day_files["document"] and (not lesson or not lesson.get("pdfFileId")):
+                f_size = os.path.getsize(day_files["document"])
+                if f_size < 50 * 1024 * 1024:
+                    try:
+                        loading_msg = await message.answer("📝 Завантаження робочого зошита...")
+                        input_file = FSInputFile(day_files["document"])
+                        sent_msg = await message.answer_document(document=input_file, caption="📝 Практика (робочий зошит)", protect_content=True)
+                        await loading_msg.delete()
+                        await sync_message_to_express(user_id, "bot", f"[Завантажено локальний документ: {os.path.basename(day_files['document'])}]")
+                        await register_file_id_automatically(day_num, "document", sent_msg.document.file_id, os.path.basename(day_files["document"]))
+                    except Exception as e:
+                        print(f"Помилка завантаження локального документа: {e}")
+        elif not lesson or not (lesson.get("photoFileId") or lesson.get("videoFileId") or lesson.get("audioFileId") or lesson.get("pdfFileId")):
+            # Якщо локальних файлів немає і в базі немає зареєстрованих file_id
+            info_msg = f"🌸 Матеріали для Дня {day_num} наразі готуються та будуть доступні найближчим часом."
+            await message.answer(info_msg)
+            await sync_message_to_express(user_id, "bot", info_msg)
+
+
+        # Логування успішного прогресу проходження курсу
+        await database.log_course_progress(user_id=user_id, day_num=day_num, delivery_type="command", status="delivered")
 
 
 @router.message(F.contact)
@@ -803,6 +1153,81 @@ async def process_contact(message: types.Message):
     await sync_message_to_express(user_id, "bot", reply_text)
 
 
+@router.message(F.chat.id == ADMIN_TELEGRAM_ID, F.caption.startswith("#upload"))
+async def handle_admin_media_upload(message: types.Message):
+    """
+    Обробник автоматичного завантаження медіафайлів від адміна.
+    Формат підпису: #upload [day_X] [type] або #upload [welcome] [photo]
+    де type може бути: photo, video, audio, document
+    """
+    caption = message.caption
+    
+    # Парсимо день та тип
+    match = re.search(r"#upload\s+\[(day_\d+|welcome)\]\s+\[(\w+)\]", caption)
+    if not match:
+        await message.answer("❌ Некоректний формат підпису. Має бути: `#upload [day_X] [type]` або `#upload [welcome] [photo]`")
+        return
+        
+    day_key = match.group(1)
+    media_type = match.group(2).lower()
+    
+    file_id = None
+    if media_type == "photo" and message.photo:
+        file_id = message.photo[-1].file_id
+    elif media_type == "video" and message.video:
+        file_id = message.video.file_id
+    elif media_type == "audio" and message.audio:
+        file_id = message.audio.file_id
+    elif media_type == "document" and message.document:
+        file_id = message.document.file_id
+    else:
+        await message.answer(f"❌ Медіафайл не відповідає вказаному типу [{media_type}]")
+        return
+        
+    # Оновлюємо lessons.json через Express API
+    try:
+        lessons = await get_lessons()
+        if not lessons:
+            await message.answer("❌ Список занять порожній.")
+            return
+            
+        if day_key == "welcome":
+            # Зберігаємо welcomePhotoFileId у першому уроці (як глобальний параметр)
+            for lesson in lessons:
+                lesson["welcomePhotoFileId"] = file_id
+        else:
+            day_num = int(day_key.replace("day_", ""))
+            lesson = next((l for l in lessons if l.get("day") == day_num), None)
+            if not lesson:
+                await message.answer(f"❌ День {day_num} не знайдено в списку занять.")
+                return
+                
+            if media_type == "photo":
+                lesson["photoFileId"] = file_id
+            elif media_type == "video":
+                lesson["videoFileId"] = file_id
+            elif media_type == "audio":
+                lesson["audioFileId"] = file_id
+            elif media_type == "document":
+                lesson["pdfFileId"] = file_id
+                if message.document and message.document.file_name:
+                    lesson["pdfFiles"] = [message.document.file_name]
+                
+        # Відправляємо оновлений масив назад на Express
+        if config.EXPRESS_API_URL:
+            express_url = config.EXPRESS_API_URL.rstrip('/')
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.put(f"{express_url}/api/lessons", json={"lessons": lessons})
+                if res.status_code == 200:
+                    await message.answer(f"✅ Успішно зареєстровано {media_type} для {day_key}!")
+                else:
+                    await message.answer(f"❌ Помилка збереження на Express: {res.text}")
+        else:
+            await message.answer("❌ EXPRESS_API_URL не налаштовано, не вдалося зберегти зміни.")
+    except Exception as e:
+        await message.answer(f"❌ Виникла помилка при реєстрації файлу: {e}")
+
+
 @router.message(F.text)
 async def process_general_text(message: types.Message, state: FSMContext):
     """Обробник звичайних текстових повідомлень (ШІ-асистент Gemini)."""
@@ -819,10 +1244,7 @@ async def process_general_text(message: types.Message, state: FSMContext):
     if current_state is not None:
         return
         
-    # Синхронізуємо вхідне повідомлення користувача
-    await sync_message_to_express(user_id, "user", text)
-    
-    # Сповіщення адміна
+    # Сповіщення адміна (просте сповіщення про факт повідомлення)
     user_label = f"@{message.from_user.username}" if message.from_user.username else message.from_user.full_name
     await notify_admin_about_message(user_id, user_label, text, message.bot)
     
@@ -835,19 +1257,96 @@ async def process_general_text(message: types.Message, state: FSMContext):
             "• /day1 ... /day8 — отримати матеріали конкретного дня (доступно для оплачених тарифів)\n\n"
             "📩 Напишіть своє питання у цей чат, і Антоніна обов'язково відповість вам!"
         )
+        await sync_message_to_express(user_id, "user", text)
         await message.answer(help_text, parse_mode="Markdown")
         await sync_message_to_express(user_id, "bot", help_text)
         return
         
-    # Отримання відповіді від Gemini AI
+    # Лімітування кількості запитів до ШІ на добу (максимум 15 повідомлень)
+    from datetime import date
+    today = date.today()
+    user_tracker = user_ai_daily_tracker.get(user_id)
+    
+    user_link = f"https://t.me/{message.from_user.username}" if message.from_user.username else f"tg://user?id={user_id}"
+    user_name_display = message.from_user.full_name
+
+    if user_tracker and user_tracker[0] == today:
+        current_count = user_tracker[1]
+        if current_count >= 15:
+            limit_msg = (
+                "⚠️ *Ви перевищили ліміт щоденних звернень до ШІ-асистента (макс. 15 повідомлень на добу).*\n\n"
+                "Ваш запит перенаправлено Антоніні особисто. Вона відповість вам найближчим часом! 🙏"
+            )
+            await sync_message_to_express(user_id, "user", text)
+            await message.answer(limit_msg, parse_mode="Markdown")
+            await sync_message_to_express(user_id, "bot", limit_msg)
+            # Форсуємо виклик адміністратора для відповіді через спеціального адмін-бота
+            try:
+                admin_warning = (
+                    f"🚨 <b>Користувач перевищив ліміт ШІ і очікує відповіді!</b>\n\n"
+                    f"👤 <b>Ім'я:</b> {user_name_display}\n"
+                    f"🆔 <b>Telegram ID:</b> <code>{user_id}</code>\n"
+                    f"💬 <b>Нікнейм:</b> @{message.from_user.username if message.from_user.username else 'відсутній'}\n\n"
+                    f"<b>Запит:</b> <i>\"{text}\"</i>\n\n"
+                    f"👉 <a href=\"{user_link}\"><b>ВІДКРИТИ ДІАЛОГ З КОРИСТУВАЧЕМ</b></a>"
+                )
+                await send_admin_bot_notification(admin_warning)
+            except Exception:
+                pass
+            return
+        else:
+            user_ai_daily_tracker[user_id] = (today, current_count + 1)
+    else:
+        user_ai_daily_tracker[user_id] = (today, 1)
+
+    # 1. Спочатку отримуємо попередній діалог користувача з бази даних (ще без поточного повідомлення!)
+    history = []
+    try:
+        history = await database.get_user_messages(user_id, limit=6)
+    except Exception as e:
+        print(f"Помилка отримання історії для ШІ: {e}")
+
+    # 2. Тепер синхронізуємо вхідне повідомлення користувача в базу (після отримання історії)
+    await sync_message_to_express(user_id, "user", text)
+
+    # Отримання відповіді від ШІ (Groq Llama-3 або Gemini) з урахуванням історії
     reply_text = "Дякую за повідомлення! Я обов'язково відповім вам найближчим часом. ✨"
-    gemini_key = config.GEMINI_API_KEY
-    if gemini_key:
-        reply_text = await generate_gemini_response(text, username, gemini_key)
+    if config.GROQ_API_KEY or config.GEMINI_API_KEY:
+        reply_text = await generate_ai_response(text, username, history)
     else:
         # Спроба взяти дефолтну відповідь, якщо ключа немає
-        reply_text = "Дякую за повідомлення! Я передам його Антоніні. 😊"
+        reply_text = "Дякую за повідомлення! Я передам його Антоніні. 😊 [CALL_HUMAN]"
+        
+    # Регулярні вирази для форсування виклику людини (fail-safe)
+    escalation_keywords = [
+        "поклич", "покличте", "зв'язатися", "зв'язок", "адмін", "адміністратор", 
+        "не проходить оплата", "помилка оплати", "оплата не", "не працює оплата",
+        "wayforpay", "проблема з оплатою", "антоніна"
+    ]
+    force_human = any(kw in text.lower() for kw in escalation_keywords)
+
+    need_human = False
+    if "[CALL_HUMAN]" in reply_text or force_human:
+        need_human = True
+        reply_text = reply_text.replace("[CALL_HUMAN]", "").strip()
+        # Додаємо екологічну ремарку користувачу, якщо її ще немає в тексті відповіді
+        if "покликала Антоніну" not in reply_text:
+            reply_text += "\n\n*(я вже покликала Антоніну, вона відповість особисто найближчим часом)*"
         
     await message.answer(reply_text)
     # Синхронізуємо відповідь бота
     await sync_message_to_express(user_id, "bot", reply_text)
+
+    if need_human:
+        try:
+            admin_warning = (
+                f"🚨 <b>Користувач потребує особистої відповіді!</b>\n\n"
+                f"👤 <b>Ім'я:</b> {user_name_display}\n"
+                f"🆔 <b>Telegram ID:</b> <code>{user_id}</code>\n"
+                f"💬 <b>Нікнейм:</b> @{message.from_user.username if message.from_user.username else 'відсутній'}\n\n"
+                f"<b>Запит:</b> <i>\"{text}\"</i>\n\n"
+                f"👉 <a href=\"{user_link}\"><b>ВІДКРИТИ ДІАЛОГ З КОРИСТУВАЧЕМ</b></a>"
+            )
+            await send_admin_bot_notification(admin_warning)
+        except Exception as e:
+            print(f"Помилка надсилання сповіщення адміну: {e}")

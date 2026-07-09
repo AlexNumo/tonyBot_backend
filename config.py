@@ -24,8 +24,11 @@ if not SUPABASE_KEY:
 
 # Додаткові налаштування для об'єднання ботів
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 EXPRESS_API_URL = os.getenv("EXPRESS_API_URL", "http://localhost:3000")
 LESSONS_FILE_PATH = os.getenv("LESSONS_FILE_PATH", "../tony_tg_bot-main/src/data/lessons.json")
+ADMIN_BOT_TOKEN = os.getenv("ADMIN_BOT_TOKEN", "8923506126:AAE4CrClTzepTR4T2WfmjlYUB2Yba_d_3Tg")
+ADMIN_TELEGRAM_ID = int(os.getenv("ADMIN_TELEGRAM_ID", "7780694746"))
 
-if not GEMINI_API_KEY:
-    print("Попередження: GEMINI_API_KEY не знайдено у файлі .env. ШІ-помічник працюватиме в режимі заглушки.")
+if not GEMINI_API_KEY and not GROQ_API_KEY:
+    print("Попередження: GEMINI_API_KEY та GROQ_API_KEY не знайдено у файлі .env. ШІ-помічник працюватиме в режимі заглушки.")
