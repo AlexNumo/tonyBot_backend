@@ -37,31 +37,31 @@ TEST_QUESTIONS = [
 PROGRAM_DAYS = {
     1: {
         "title": "День 1. Я не втратила мотивацію. Я переросла.",
-        "desc": "Побачити, що ти не в тупику, а на порозі нового етапу.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Побачити, що ти не в тупику, а на порозі нового етапу.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     2: {
         "title": "День 2. Що насправді забирає мою енергію.",
-        "desc": "Знайти реальні джерела ресурсу в своєму дні, а не абстрактну втому.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Знайти реальні джерела ресурсу в своєму дні, а не абстрактну втому.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     3: {
         "title": "День 3. Що я тримаю — і боюсь відпустити.",
-        "desc": "Побачити ціну утримання старого і чесно назвати страх змін.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Побачити ціну утримання старого і чесно назвати страх змін.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     4: {
         "title": "День 4. Зустріч із собою справжньою.",
-        "desc": "Почути себе за межами ролей, очікувань і постійного 'треба'.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Почути себе за межами ролей, очікувань і постійного 'треба'.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     5: {
         "title": "День 5. Точка відчаю.",
-        "desc": "Новий урок! Як не загубити себе в лімінальному просторі «між» старим і новим.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Новий урок! Як не загубити себе в лімінальному просторі «між» старим і новим.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     6: {
         "title": "День 6. Чому я не дозволяю собі більшого.",
-        "desc": "Розпізнати внутрішню стелю, core beliefs (глибинні переконання) та установки, які обмежують наступний рівень.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Розпізнати внутрішню стелю, core beliefs (глибинні переконання) та установки, які обмежують наступний рівень.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     7: {
         "title": "День 7. Рішення вже є. Я просто боюсь його почути.",
-        "desc": "Як розрізнити страх і справжнє «ні», увімкнути тілесний відгук і довіритись собі.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Робочий зошит"
+        "desc": "Як розрізнити страх і справжнє «ні», увімкнути тілесний відгук і довіритись собі.\n\n🎬 Відео 15-20 хв\n🎧 Аудіо-практика\n📝 Текстова версія практики"
     },
     8: {
         "title": "День 8. Інтеграція та фінал.",
@@ -171,7 +171,7 @@ async def generate_ai_response(user_prompt: str, username: str, history: list = 
         "ПРАВИЛА ПОВЕДІНКИ:\n"
         "1. Якщо учасниця почувається погано, втомленою чи тривожною: підтримай її, порадь повернути увагу в тіло, зробити повільний видих.\n"
         "2. Якщо просить платні матеріали (День 2-8), ввічливо поясни, що вони відкриваються після оплати тарифу в кабінеті WebApp.\n"
-        "3. Якщо просить зв'язати її з Антоніною, скаржиться на помилки оплати чи висловлює глибоку кризу — обов'язково закінчи свою відповідь виключно тегом [CALL_HUMAN] на новому рядку."
+        "3. Якщо просить зв'язати її з Антоніною або покликати Антоніну (наприклад: «хочу поговорити з Антоніною», «поклич Антоніну»), ти повинна зрозуміти, що вона хоче поговорити з РЕАЛЬНОЮ людиною-авторкою, а не з тобою (ШІ-асистентом). У цьому випадку ти повинна ввічливо відповісти, що зараз покличеш її, і ОБОВ'ЯЗКОВО додати тег [CALL_HUMAN] на новому рядку. Також став цей тег, якщо вона скаржиться на помилки оплати чи висловлює глибоку кризу."
     ).replace("{username}", username)
 
     # 1. Спроба використати Groq API (безкоштовно, без карти)
@@ -191,8 +191,9 @@ async def generate_ai_response(user_prompt: str, username: str, history: list = 
                 messages.append({"role": role, "content": clean_text})
         messages.append({"role": "user", "content": user_prompt})
 
+        print(f"[Groq AI] Sending history context: {len(history)} messages. Current prompt: '{user_prompt}'")
         payload = {
-            "model": "llama-3.1-8b-instant",
+            "model": "llama-3.3-70b-versatile",
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 250  # Обмеження вихідних токенів для економії ліміту
@@ -1056,7 +1057,7 @@ async def cmd_day(message: types.Message):
             if lesson.get("pdfFileId"):
                 try:
                     await asyncio.sleep(15)
-                    await message.answer_document(document=lesson.get("pdfFileId"), caption="📝 Практика (робочий зошит)", protect_content=True)
+                    await message.answer_document(document=lesson.get("pdfFileId"), caption="📝 Текстова версія практики (якщо вам зручніше читати, ніж слухати)", protect_content=True)
                     await sync_message_to_express(user_id, "bot", "[Надіслано робочий зошит за file_id]")
                 except Exception as e:
                     print(f"Помилка надсилання документа за file_id: {e}")
@@ -1109,9 +1110,9 @@ async def cmd_day(message: types.Message):
                 f_size = os.path.getsize(day_files["document"])
                 if f_size < 50 * 1024 * 1024:
                     try:
-                        loading_msg = await message.answer("📝 Завантаження робочого зошита...")
+                        loading_msg = await message.answer("📝 Завантаження текстової версії практики...")
                         input_file = FSInputFile(day_files["document"])
-                        sent_msg = await message.answer_document(document=input_file, caption="📝 Практика (робочий зошит)", protect_content=True)
+                        sent_msg = await message.answer_document(document=input_file, caption="📝 Текстова версія практики (якщо вам зручніше читати, ніж слухати)", protect_content=True)
                         await loading_msg.delete()
                         await sync_message_to_express(user_id, "bot", f"[Завантажено локальний документ: {os.path.basename(day_files['document'])}]")
                         await register_file_id_automatically(day_num, "document", sent_msg.document.file_id, os.path.basename(day_files["document"]))
@@ -1147,10 +1148,94 @@ async def process_contact(message: types.Message):
         await database.save_user_phone(user_id, phone)
     except Exception as e:
         print(f"Помилка збереження телефону для {user_id}: {e}")
+
+    # Перевіряємо, чи є для цього телефону оплата на гостьовому записі
+    paid_status = None
+    try:
+        paid_status = await database.check_and_link_guest_payment(user_id, phone)
+    except Exception as e:
+        print(f"Помилка зв'язування оплати гостя: {e}")
+
+    if paid_status:
+        # У користувача є гостьова оплата! Активуємо доступ та відправляємо матеріали
+        package_names = {
+            "base": "Базовий (Самостійно) - 20€",
+            "support": "Супровід (Зі спікером) - 125€",
+            "vip": "VIP (Індивідуально) - 400€"
+        }
+        package_name = package_names.get(paid_status, "Оплачений тариф")
         
-    reply_text = f"✨ Дякую! Ваш номер телефону ({phone}) успішно перевірено та зареєстровано в базі.\n\nТепер ви повноправний учасник практикуму Антоніни! Напишіть будь-яке питання або очікуйте першого уроку."
-    await message.answer(reply_text)
-    await sync_message_to_express(user_id, "bot", reply_text)
+        congrats_text = (
+            f"🎉 **Вітаємо у практикумі «Точка переходу»!**\n\n"
+            f"Ми знайшли вашу оплату на сайті за тарифом **{package_name}** та успішно активували доступ!\n\n"
+            f"Нижче надсилаємо вам обіцяні матеріали: **два варіанти Робочого зошита** "
+            f"(оберіть той, який вам зручніше заповнювати) та **3 спеціальні бонуси**, "
+            f"які допоможуть вам пройти цей шлях максимально комфортно і глибоко. ✨"
+        )
+        await message.answer(congrats_text, parse_mode="Markdown")
+        await sync_message_to_express(user_id, "bot", congrats_text)
+        await asyncio.sleep(1)
+
+        # Допоміжна функція для надсилання файлів
+        async def send_file(file_path: str, media_type: str, caption: str):
+            if not os.path.exists(file_path):
+                print(f"Файл не знайдено: {file_path}")
+                return
+            input_file = FSInputFile(file_path)
+            try:
+                if media_type == "document":
+                    await message.answer_document(document=input_file, caption=caption, protect_content=True)
+                elif media_type == "audio":
+                    await message.answer_audio(audio=input_file, caption=caption, protect_content=True)
+            except Exception as ex:
+                print(f"Помилка надсилання файлу {file_path}: {ex}")
+
+        # Надсилаємо Робочий зошит 1
+        print(f"Sending workbook 1 to {user_id}...")
+        await send_file(
+            "Material/Робочий_зошит_Точка_переходу.pdf", 
+            "document", 
+            "📚 Робочий зошит «Точка переходу» (Варіант 1)\n\nТвій особистий простір для роздумів, відкриттів та чесної розмови із собою."
+        )
+        await sync_message_to_express(user_id, "bot", "[Надіслано Робочий зошит PDF (Варіант 1)]")
+        await asyncio.sleep(1.5)
+
+        # Надсилаємо Робочий зошит 2
+        print(f"Sending workbook 2 to {user_id}...")
+        await send_file(
+            "Material/Робочий_зошит_Точка_переходу_2.pdf", 
+            "document", 
+            "📚 Робочий зошит «Точка переходу» (Варіант 2)\n\nАльтернативний формат зошиту для зручного використання."
+        )
+        await sync_message_to_express(user_id, "bot", "[Надіслано Робочий зошит PDF (Варіант 2)]")
+        await asyncio.sleep(2)
+
+        # Надсилаємо бонуси
+        gifts = [
+            ("Material/Gift/7_ОЗНАК_ЩО_ЗАСЛУГОВУЄШ_СВОЮ_ЦІННІСТЬ.pptx", "document", "🎁 Бонус 1: Презентація '7 ознак, що заслуговуєш свою цінність'"),
+            ("Material/Gift/СИЛА без НАПРУГИ.pptx", "document", "🎁 Бонус 2: Презентація 'Сила без напруги'"),
+            ("Material/Gift/ПРАКТИКА - Медитація подарунок.m4a", "audio", "🎁 Бонус 3: Ауріопрактика-медитація 'Повернення до себе'")
+        ]
+
+        for path_file, m_type, cap in gifts:
+            print(f"Sending gift {path_file} to {user_id}...")
+            await send_file(path_file, m_type, cap)
+            await sync_message_to_express(user_id, "bot", f"[Надіслано бонус: {os.path.basename(path_file)}]")
+            await asyncio.sleep(2)
+
+        # Сповіщення адміна
+        await send_admin_bot_notification(
+            f"⚡ <b>Користувач зв'язав свій Telegram-профіль з оплатою на сайті!</b>\n\n"
+            f"👤 <b>Користувач:</b> {user_label} (ID: {user_id})\n"
+            f"📞 <b>Телефон:</b> <code>{phone}</code>\n"
+            f"★ <b>Отриманий статус:</b> <code>{paid_status}</code>\n"
+            f"★ Гостьовий запис успішно видалено."
+        )
+    else:
+        # Звичайний користувач без попередньої оплати
+        reply_text = f"✨ Дякую! Ваш номер телефону ({phone}) успішно перевірено та зареєстровано в базі.\n\nТепер ви повноправний учасник практикуму Антоніни! Напишіть будь-яке питання або очікуйте першого уроку."
+        await message.answer(reply_text)
+        await sync_message_to_express(user_id, "bot", reply_text)
 
 
 @router.message(F.chat.id == ADMIN_TELEGRAM_ID, F.caption.startswith("#upload"))
@@ -1321,7 +1406,7 @@ async def process_general_text(message: types.Message, state: FSMContext):
     escalation_keywords = [
         "поклич", "покличте", "зв'язатися", "зв'язок", "адмін", "адміністратор", 
         "не проходить оплата", "помилка оплати", "оплата не", "не працює оплата",
-        "wayforpay", "проблема з оплатою", "антоніна"
+        "wayforpay", "проблема з оплатою", "передай антоніні", "хочу поговорити з", "покличте автора", "покличте антоніну", "поклич антоніну"
     ]
     force_human = any(kw in text.lower() for kw in escalation_keywords)
 

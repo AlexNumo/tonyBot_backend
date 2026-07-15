@@ -271,3 +271,46 @@ async def get_user_messages(user_id: int, limit: int = 10) -> list:
             print(f"Помилка отримання повідомлень з Supabase: {e}")
 
     return []
+
+
+async def check_and_link_guest_payment(user_id: int, phone: str) -> str | None:
+    """
+    Перевіряє, чи є гостьовий запис оплати для цього телефону.
+    Якщо є, переносить статус на real user_id, оновлює ліди,
+    видаляє гостьовий запис і повертає статус тарифу.
+    """
+    clean_phone = "".join(filter(str.isdigit, phone))
+    if len(clean_phone) < 9:
+        return None
+        
+    guest_id = int(clean_phone[-10:])
+    
+    if supabase:
+        try:
+            # Шукаємо гостьовий запис
+            res = await asyncio.to_thread(
+                lambda: supabase.table("users").select("*").eq("user_id", guest_id).maybe_single().execute()
+            )
+            if res.data and res.data.get("status") != "free":
+                status = res.data["status"]
+                
+                # Оновлюємо статус реального користувача
+                await asyncio.to_thread(
+                    lambda: supabase.table("users").update({"status": status, "phone": phone}).eq("user_id", user_id).execute()
+                )
+                
+                # Оновлюємо ліди (переносимо user_id з guest_id на user_id)
+                await asyncio.to_thread(
+                    lambda: supabase.table("leads").update({"user_id": user_id}).eq("user_id", guest_id).execute()
+                )
+                
+                # Видаляємо гостьового користувача
+                await asyncio.to_thread(
+                    lambda: supabase.table("users").delete().eq("user_id", guest_id).execute()
+                )
+                
+                return status
+        except Exception as e:
+            print(f"Помилка зв'язування гостьового акаунту в Supabase: {e}")
+            
+    return None
