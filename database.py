@@ -27,9 +27,7 @@ async def add_user(
             express_url = config.EXPRESS_API_URL.rstrip('/')
             payload = {
                 "telegramId": str(user_id),
-                "username": username or f"user_{user_id}",
-                "status": "free",
-                "currentDay": 1
+                "username": username or f"user_{user_id}"
             }
             if first_name is not None: payload["firstName"] = first_name
             if last_name is not None: payload["lastName"] = last_name
@@ -50,7 +48,17 @@ async def add_user(
 
     if supabase:
         try:
-            data = {"user_id": user_id, "username": username}
+            existing_res = await asyncio.to_thread(lambda: supabase.table("users").select("status, phone").eq("user_id", user_id).maybe_single().execute())
+            data = {"user_id": user_id, "username": username or f"user_{user_id}"}
+            
+            if existing_res and existing_res.data:
+                if existing_res.data.get("status"):
+                    data["status"] = existing_res.data.get("status")
+                if existing_res.data.get("phone"):
+                    data["phone"] = existing_res.data.get("phone")
+            else:
+                data["status"] = "free"
+
             if first_name is not None: data["first_name"] = first_name
             if last_name is not None: data["last_name"] = last_name
             if avatar_url is not None: data["avatar_url"] = avatar_url
